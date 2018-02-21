@@ -1,5 +1,5 @@
 # Qualys
 Template for install Qualys with agent
-Add-OMS-Extension-Master.json | Add OMS extension to VM, the template is location aware | <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fgithub.com%2Fyudongkai%2FQualys%2FDeployAzureVM.json" target="_blank">Deploy</a> |
+Add-OMS-Extension-Master.json | Add OMS extension to VM, the template is location aware | <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fyudongkai%2FQualys%2Fmaster%2FDeployAzureVM.json" target="_blank">Deploy</a> |
 
 
