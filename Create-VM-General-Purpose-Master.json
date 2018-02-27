@@ -1,0 +1,438 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.5.5",
+    "parameters": {
+        "vmName": {
+            "type": "string",
+            "defaultValue": "AZWAPPT1",
+            "metadata": {
+                "description": "Specify VM name"
+            }
+        },
+        "environment": {
+            "type": "string",
+            "allowedValues": [
+                "prod",
+                "stage",
+                "dev",
+                "test"
+            ],
+            "metadata": {
+                "description": "Environment type"
+            }
+        },
+        "attachDomain": {
+            "type": "string",
+            "defaultValue": "standalone",
+            "allowedValues": [
+                "mfcgd.com",
+                "standalone"
+            ],
+            "metadata": {
+                "description": "Should VM be attached to domain"
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "defaultValue": "ZXCasdqwe123$%",
+            "metadata": {
+                "description": "Password for azadmin"
+            }
+        },
+        "vmSize": {
+            "type": "string",
+            "defaultValue": "Small",
+            "allowedValues": [
+                "Small",
+                "Medium",
+                "Medium Plus"
+            ],
+            "metadata": {
+                "description": "Select VM size"
+            }
+        },
+        "backupService": {
+            "type": "string",
+            "defaultValue": "Backup not required",
+            "allowedValues": [
+                "Backup required",
+                "Backup not required"
+            ],
+            "metadata": {
+                "description": "Is backup required?"
+            }
+        },
+        "storageType": {
+            "type": "string",
+            "defaultValue": "Standard",
+            "allowedValues": [
+                "Standard",
+                "Premium"
+            ],
+            "metadata": {
+                "description": "Select storage type"
+            }
+        },
+        "dataDisks128GB": {
+            "type": "int",
+            "defaultValue": 0,
+            "minValue": 0,
+            "maxValue": 16,
+            "metadata": {
+                "description": "How many 128GB data disks to provision?"
+            }
+        },
+        "dataDisks512GB": {
+            "type": "int",
+            "defaultValue": 0,
+            "minValue": 0,
+            "maxValue": 16,
+            "metadata": {
+                "description": "How many 512GB data disks to provision?"
+            }
+        },
+        "dataDisks1TB": {
+            "type": "int",
+            "defaultValue": 0,
+            "minValue": 0,
+            "maxValue": 16,
+            "metadata": {
+                "description": "How many 1TB data disks to provision?"
+            }
+        },
+        "virtualNetwork": {
+            "type": "string",
+            "defaultValue": "MFCv2-Internal-CAC-Development-S1",
+            "metadata": {
+                "description": "Select vNet"
+            }
+        },
+        "subnet": {
+            "type": "string",
+            "defaultValue": "Presentation",
+            "metadata": {
+                "description": "select subnet"
+            }
+        },
+        "costCenter": {
+            "type": "string",
+            "defaultValue": "9800",
+            "metadata": {
+                "description": "Provide cost center"
+            }
+        },
+        "installOMSExtension": {
+            "type": "string",
+            "defaultValue": "Yes",
+            "allowedValues": [
+                "Yes",
+                "No"
+            ],
+            "metadata": {
+                "description": "Should default extensions be installed?"
+            }
+        },
+        "installSEP": {
+            "type": "string",
+            "defaultValue": "Yes",
+            "allowedValues": [
+                "Yes",
+                "No"
+            ]
+        },
+        "installQualys": {
+            "type": "string",
+            "defaultValue": "Yes",
+            "allowedValues": [
+                "Yes",
+                "No"
+            ]
+        }
+    },
+    "variables": {
+        "defaultAdmin": "azadmin",
+        "vmSizeKey": {
+            "Small": "Standard_D2s_v3",
+            "Medium": "Standard_D4s_v3",
+            "Medium Plus": "Standard_D8s_v3"
+        },
+        "storageTypeKey": {
+            "Standard": "Standard_LRS",
+            "Premium": "Premium_LRS"
+        },
+        "vmNameId": "[resourceId('Microsoft.Compute/virtualMachines', parameters('vmName'))]",
+        "vNICName": "[concat('NIC-', parameters('vmName'), '-1')]",
+        "vNICNameId": "[resourceId('Microsoft.Network/networkInterfaces',variables('vNICName'))]",
+        "vNetId": "[resourceId(concat('VNET_',parameters('virtualNetwork')), 'Microsoft.Network/virtualNetworks/', parameters('virtualNetwork'))]",
+        "subnetId": "[concat(variables('vnetId'),'/subnets/', parameters('subnet'))]",
+        "imagePublisher": "MicrosoftWindowsServer",
+        "imageOffer": "WindowsServer",
+        "imageSKU": "2016-Datacenter",
+        "imageVersion": "latest",
+        "defaultOSDiskSize": "128",
+        "diagAccountName": "[concat('vmdiag',uniqueString(subscription().subscriptionId, resourceGroup().location))]",
+        "diagAccountRg": "[concat('DIAG-ACCOUNTS-', toUpper(resourceGroup().location))]",
+        "diagAccountId": "[resourceId(subscription().subscriptionId, variables('diagAccountRg'), 'Microsoft.Storage/storageAccounts/', variables('diagAccountName'))]",
+        "defaultPolicyName": "DefaultPolicy",
+        "recoveryVaultName": "[concat('RECOVERY-VAULT-', toUpper(resourceGroup().location), '-', toUpper(parameters('environment')), '-1')]",
+        "recoveryVaultRg": "[concat('RECOVERY-VAULTS-', toUpper(resourceGroup().location))]",
+        "recoveryVaultPolicyId": "[resourceId(subscription().subscriptionId, variables('recoveryVaultRg'),'Microsoft.RecoveryServices/vaults/backupPolicies', variables('recoveryVaultName'), variables('defaultPolicyName') )]",
+        "protectectioContainer": "[concat('/Azure/iaasvmcontainer;iaasvmcontainerv2;', resourceGroup().name, ';', parameters('vmName'))]",
+        "protectedItem": "[concat('/vm;iaasvmcontainerv2;', resourceGroup().name, ';', parameters('vmName'))]",
+        "copy": [
+            {
+                "name": "dataDisks128",
+                "count": "[if(equals(parameters('dataDisks128GB'),0),1, parameters('dataDisks128GB'))]",
+                "input": {
+                    "name": "[concat('DISK-', toUpper(parameters('vmName')), '-DATA-', copyIndex('dataDisks128'))]",
+                    "lun": "[copyIndex('dataDisks128')]",
+                    "createOption": "Empty",
+                    "caching": "ReadWrite",
+                    "diskSizeGB": 128,
+                    "managedDisk": {
+                        "storageAccountType": "[variables('storageTypeKey')[parameters('storageType')]]"
+                    }   
+                }
+            },
+            {
+                "name": "dataDisks512",
+                "count": "[if(equals(parameters('dataDisks512GB'),0),1, parameters('dataDisks512GB'))]",
+                "input": {
+                    "name": "[concat('DISK-', toUpper(parameters('vmName')), '-DATA-', add(parameters('dataDisks128GB'),copyIndex('dataDisks512')))]",
+                    "lun": "[add(parameters('dataDisks128GB'),copyIndex('dataDisks512'))]",
+                    "createOption": "Empty",
+                    "caching": "ReadWrite",
+                    "diskSizeGB": 512,
+                    "managedDisk": {
+                        "storageAccountType": "[variables('storageTypeKey')[parameters('storageType')]]"
+                    }   
+                }
+            },
+            {
+                "name": "dataDisks1023",
+                "count": "[if(equals(parameters('dataDisks1TB'),0),1, parameters('dataDisks1TB'))]",
+                "input": {
+                    "name": "[concat('DISK-', toUpper(parameters('vmName')), '-DATA-', add(add(parameters('dataDisks128GB'), parameters('dataDisks512GB')), copyIndex('dataDisks1023')))]",
+                    "lun": "[add(add(parameters('dataDisks128GB'), parameters('dataDisks512GB')), copyIndex('dataDisks1023'))]",
+                    "createOption": "Empty",
+                    "caching": "ReadWrite",
+                    "diskSizeGB": 1023,
+                    "managedDisk": {
+                        "storageAccountType": "[variables('storageTypeKey')[parameters('storageType')]]"
+                    }   
+                }
+            }
+        ],
+    "zero": [],
+    "disk128": "[if(equals(parameters('dataDisks128GB'),0), variables('zero'), variables('dataDisks128'))]",
+    "disk512": "[if(equals(parameters('dataDisks512GB'),0), variables('zero'), variables('dataDisks512'))]",
+    "disk1023": "[if(equals(parameters('dataDisks1TB'),0), variables('zero'), variables('dataDisks1023'))]",
+    "allDataDisks": "[concat(variables('disk128'), variables('disk512'), variables('disk1023'))]"
+    },
+    "resources": [
+        {
+            "condition": "[equals(parameters('installOMSExtension'),'Yes')]",
+            "name": "OMSExtension",
+            "apiVersion": "2017-05-10",
+            "type": "Microsoft.Resources/deployments",
+            "dependsOn": [
+                "[variables('vmNameId')]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[uri(deployment().properties.templateLink.uri, 'Extensions/OMS-Extension.json')]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters": {
+                    "vmName": {
+                        "value": "[parameters('vmName')]"
+                    }
+
+                }
+            }
+        },
+        {
+            "condition": "[equals(parameters('installSEP'),'Yes')]",
+            "name": "[concat(parameters('vmName'), '/SymantecEndpointProtection')]",
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "apiVersion": "2015-06-15",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('vmNameId')]"
+            ],
+            "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "CustomScriptExtension",
+                "typeHandlerVersion": "1.9",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "fileUris": [
+                        "https://autoehdnqnzkdshhq.blob.core.windows.net/sep/Install-SEP.ps1"
+                    ]
+                },
+                "protectedSettings": {
+                    "commandToExecute": "powershell.exe -ExecutionPolicy Unrestricted -File Install-SEP.ps1",
+                    "storageAccountName": "autoehdnqnzkdshhq",
+                    "storageAccountKey": "l3zRRFnmRRuBZuEbbqyU+L5X8Kmv+ZQof+w9X7C3Cmr6Ns+PMwlAF4//+XNzuz/xg2zB7/MPHEnhjhCfBSh+dg=="
+                }
+            }
+        },
+        {
+            "condition": "[equals(parameters('installQualys'),'Yes')]",
+            "name": "[concat(parameters('vmName'), '/QualysAgent')]",
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "apiVersion": "2015-06-15",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[variables('vmNameId')]"
+            ],
+            "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "CustomScriptExtension",
+                "typeHandlerVersion": "1.9",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "fileUris": [
+                        "https://customscriptautomation.blob.core.windows.net/qualys/Install-Qualys.ps1"
+                    ]
+                },
+                "protectedSettings": {
+                    "commandToExecute": "powershell.exe -ExecutionPolicy Unrestricted -File Install-Qualys.ps1",
+                    "storageAccountName": "customscriptautomation",
+                    "storageAccountKey": "/3NvuXZRMWCw6vC0xRGnIVmX/HEim7e9wbbzlGa5lJ3XV4aFvK4cMB8+S87YPOscadeT0SgV52PBB+dHdkmx2g=="
+                }
+            }
+        },
+       {
+            "name": "[variables('vNICName')]",
+            "apiVersion": "2017-06-01",
+            "type": "Microsoft.Network/networkInterfaces",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "ipConfigurations":[
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[variables('subnetId')]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "SettingStaticIP",
+            "apiVersion": "2017-05-10",
+            "type": "Microsoft.Resources/deployments",
+            "dependsOn": [
+                "[variables('vNICNameId')]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[uri(deployment().properties.templateLink.uri, 'Network/Set-StaticIP.json')]",
+                    "contentVersion": "1.0.0.5"
+                },
+                "parameters": {
+                    "vNICName": {
+                        "value": "[variables('vNICName')]"
+                    },
+                    "vNICIP": {
+                        "value": "[reference(variables('vNICNameId')).ipConfigurations[0].properties.privateIPAddress]"
+                    },
+                    "vNICSubnetId": {
+                        "value": "[variables('subnetId')]"
+                    }
+                }
+            }
+        },
+        {
+            "condition": "[equals(parameters('backupService'),'Backup required')]",
+            "name": "nestedTemplateRecoveryServices",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2017-05-10",
+            "resourceGroup": "[variables('recoveryVaultRg')]",
+            "dependsOn": [
+                "[variables('vmNameId')]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "resources": [
+                        {
+                            "name": "[concat(variables('recoveryVaultName'), variables('protectectioContainer'), variables('protectedItem'))]",
+                            "type": "Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems",
+                            "apiVersion": "2016-12-01",
+                            "location": "[resourceGroup().location]",
+                            "properties": {
+                                "protectedItemType": "Microsoft.Compute/virtualMachines",
+                                "workloadType": "VM",
+                                "sourceResourceId": "[variables('vmNameId')]",
+                                "policyId": "[variables('recoveryVaultPolicyId')]"
+                            }
+                        }
+                    ]
+                }
+            }
+        }, 
+        {
+            "name": "[parameters('vmName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2017-03-30",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "CostCenter": "[parameters('costCenter')]"
+            },
+            "dependsOn": [
+                "[variables('vNICNameId')]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[variables('vmSizeKey')[parameters('vmSize')]]"
+                },
+                "osProfile": {
+                    "computerName": "[parameters('vmName')]",
+                    "adminUsername": "[variables('defaultAdmin')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[variables('imageSKU')]",
+                        "version": "[variables('imageVersion')]"
+                    },
+                    "osDisk": {
+                        "name": "[concat('DISK-', parameters('vmName'), '-OS')]",
+                        "createOption": "FromImage",
+                        "diskSizeGB": "[variables('defaultOSDiskSize')]",
+                        "caching": "ReadWrite",
+                        "managedDisk": {
+                            "storageAccountType": "[variables('storageTypeKey')[parameters('storageType')]]"
+                        }
+                    },
+                    "dataDisks": "[variables('allDataDisks')]"  
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[variables('vNICNameId')]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[reference(variables('diagAccountId') , '2017-10-01').primaryEndpoints.blob]"
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": { }
+}
